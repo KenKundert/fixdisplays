@@ -94,7 +94,6 @@ class Displays:
             xrandr_cmd += ['--output', display, '--auto']
             if i:
                 xrandr_cmd += ['--right-of', use[i-1]]
-            on.append(args)
         for display in dont:
             xrandr_cmd += ['--output', display, '--off']
         run(xrandr_cmd, self.debug)
