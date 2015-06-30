@@ -115,7 +115,7 @@ class Displays:
             sink = external_audio_sink
             return self._configure(use, dont, sink)
         if self.debug:
-            print('dual external monitor configuration is not available')
+            print('Dual external monitor configuration is not available.')
         return False
     
     def configure_builtin_and_projector(self):
@@ -127,7 +127,7 @@ class Displays:
             sink = internal_audio_sink
             return self._configure(use, dont, sink)
         if self.debug:
-            print('built-in and projector display configuration is not available')
+            print('Built-in and projector display configuration is not available.')
         return False
     
     def configure_builtin(self):
@@ -138,7 +138,7 @@ class Displays:
             sink = internal_audio_sink
             return self._configure(use, dont, sink)
         if self.debug:
-            print('built-in display configuration is not available')
+            print('Built-in display configuration is not available.')
         return False
 
     def configure_default(self):
