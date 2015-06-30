@@ -45,14 +45,17 @@ class Display:
         self.name = name
         components = name.split('-')
         if len(components) == 3:
+            # in this case, names take the form: DP-1-1
             self.kind = components[0]
             self.card = components[1]
             self.output = components[2]
         elif len(components) == 2:
+            # in this case, names take the form: DP-1
             self.kind = components[0]
             self.card = '0'
             self.output = components[1]
         else:
+            # in this case, names take the form: DP1
             self.kind = name.strip('0123456789')
             self.card = '0'
             self.output = name[len(self.kind):]
