@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # Partition available displays into three types: builtin, external, and
 # projectors. Predefine sets of displays that can then be configured for use.
 # Modify the code to change the predefined configurations. Use command line to
@@ -19,6 +19,7 @@ Options:
     -t, --trialrun   describe what would be done rather than doing it
 """
 
+from __future__ import print_function
 import scripts
 import docopt
 
