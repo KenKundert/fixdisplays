@@ -150,8 +150,8 @@ class Displays:
         result = self.configure_builtin_and_projector()
         if result:
             return result
-        return configure_builtin()
-    
+        return self.configure_builtin()
+
 # initialization
 scripts.script_prefs(exit_upon_error=False, show_cmd_in_errors=False)
 
