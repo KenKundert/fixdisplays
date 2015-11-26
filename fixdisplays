@@ -1,12 +1,4 @@
-#!/usr/bin/env python
-# Partition available displays into three types: builtin, external, and
-# projectors. Predefine sets of displays that can then be configured for use.
-# Modify the code to change the predefined configurations. Use command line to
-# select which predefined configuration should be used.
-#
-# When run, configures desired set of displays. Also sets the default audio
-# sink.
-
+#!/bin/env python
 """Control which screens are used.
 
 Usage:
@@ -16,162 +8,215 @@ Options:
     -l, --laptop     enable built-in screen, disable all others.
     -d, --desktop    enable external monitors, disable all others.
     -p, --projector  enable external VGA projector along with built-in screen.
-    -t, --trialrun   describe what would be done rather than doing it
+    -s, --swap       swap the displays
+    -v, --verbose    narrate the changes
 """
 
-from __future__ import print_function
-import scripts
+# Imports {{{1
+from scripts import Sh, ScriptError, sh, script_prefs
+script_prefs(exit_upon_error = False)
 import docopt
+import sys
 
-# use 'pactl list' to determine names of audio sinks
-# set to None if it setting the default audio sink is not desired
-external_audio_sink = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00-Device.analog-stereo'
-internal_audio_sink = 'alsa_output.pci-0000_00_1b.0.analog-stereo'
+# Constants {{{1
+LAPTOP_PREFIX = 'LVDS'
+DESKTOP_PREFIX = 'DP'
+PROJECTOR_PREFIX = 'VGA'
 
-# cleanup_cmd will be run after displays are configure, set to None to skip
-cleanup_cmd = None # 'r'
+# use 'pactl list' to determine names of audio sinks                             
+# # set to None if it setting the default audio sink is not desired                
+EXTERNAL_AUDIO_SINK = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00-Device.analog-stereo'
+INTERNAL_AUDIO_SINK = 'alsa_output.pci-0000_00_1b.0.analog-stereo' 
 
-def run(cmd, debug):
-    if debug:
-        print('RUN:', ' '.join(cmd))
-    else:
-        try:
-            scripts.run(cmd)
-        except scripts.ScriptError as error:
-            print("fixdisplays: '%s' found when running:" % str(error))
-            print("   ", ' '.join(cmd))
+# Configuration class {{{1
+class Configuration:
+    # __init__() {{{2
+    def __init__(self, available_displays, unavailable_displays):
+        self.xrandr_cmd = ['xrandr']
+        self.available_displays = available_displays
 
-class Display:
-    def __init__(self, name):
-        self.name = name
-        components = name.split('-')
-        if len(components) == 3:
-            # in this case, names take the form: DP-1-1
-            self.kind = components[0]
-            self.card = components[1]
-            self.output = components[2]
-        elif len(components) == 2:
-            # in this case, names take the form: DP-1
-            self.kind = components[0]
-            self.card = '0'
-            self.output = components[1]
+        # configure the displays
+        if not self.is_suitable():
+            sys.exit('Displays not available to support %s configuration.' % (
+                self.__class__.__name__.lower()
+            ))
+
+        # disable those displays that are not present
+        #for display in unavailable_displays:
+        #    self.disable_display(display)
+
+        if cmdline['--verbose']:
+            print('Available displays:', ', '.join(available_displays))
+            print('Unavailable displays:', ', '.join(unavailable_displays))
+
+    # disable_unneeded() {{{2
+    def disable_unneeded(self, use):
+        for display in self.available_displays:
+            if display not in use:
+                if cmdline['--verbose']:
+                    print('Disable display:', display)
+                self.xrandr_cmd += ['--output', display, '--off']
+
+    # enable_needed() {{{2
+    def enable_needed(self, use):
+        for display in use:
+            if cmdline['--verbose']:
+                print('Enable display:', display)
+            self.xrandr_cmd += ['--output', display, '--auto']
+
+    # primary_display() {{{2
+    def primary_display(self, display):
+        if cmdline['--verbose']:
+            print('Primary display:', display)
+        self.xrandr_cmd += ['--output', display, '--primary']
+
+    # arrange_displays() {{{2
+    def arrange_displays(self, screens):
+        if len(screens) == 2:
+            if cmdline['--verbose']:
+                print('Arrange displays:', ', '.join([left, right]))
+            if cmdline['--swap']:
+                right, left = screens
+            else:
+                left, right = screens
+            self.xrandr_cmd += ['--output', left, '--right-of', right]
         else:
-            # in this case, names take the form: DP1
-            self.kind = name.strip('0123456789')
-            self.card = '0'
-            self.output = name[len(self.kind):]
+            assert len(screens) <= 2
+            assert len(screens) >= 1
 
-    def __repr__(self):
-        return ':'.join([self.kind, self.card, self.output])
+    # run_xrandr() {{{2
+    def run_xrandr(self):
+        try:
+            if cmdline['--verbose']:
+                print('RUNNING:', ' '.join(self.xrandr_cmd))
+            Sh(self.xrandr_cmd)
+        except ScriptError as exception:
+            print('Could not configure display with xrandr: %s' % exception)
 
-    def __str__(self):
-        return self.name
+    # set_default_sound_sink() {{{2
+    def set_default_sound_sink(self, sink):
+        try:
+            if cmdline['--verbose']:
+                print('Set default sound sink: %s' % sink)
+            Sh('pactl set-default-sink %s' % sink)
+        except ScriptError:
+            print('Could not set default sound sink: %s' % sink)
 
-class Displays:
-    def __init__(self, debug):
-        self.debug = debug
+# define known configurations
+# known configuration -- laptop without projector {{{1
+class Laptop(Configuration):
+    @classmethod
+    def is_suitable(cls):
+        return bool(laptop_screens)
 
-        # find available displays
-        self.available = set()
-        xrandr = scripts.Run(['xrandr', '--query'], modes='sOeW0')
-        self.active_displays = 0
-        for line in xrandr.stdout.split('\n'):
-            if '*+' in line:
-                self.active_displays += 1
-            words = line.split()
-            if len(words) >= 2 and words[1] == 'connected':
-                self.available.add(Display(words[0]))
-        self.builtin = sorted([d.name for d in self.available if d.kind in ['LVDS']])
-        self.external = sorted([d.name for d in self.available if d.kind in ['DP']], reverse=True)
-        self.projector = sorted([d.name for d in self.available if d.kind in ['VGA']])
-        assert len(self.available) == (len(self.builtin) + len(self.external) + len(self.projector))
-        if debug:
-            print('Built in:', ', '.join(self.builtin))
-            print('External:', ', '.join(self.external))
-            print('Projector:', ', '.join(self.projector))
-            print('Currently Active:', self.active_displays)
+    def configure(self):
+        use = laptop_screens[0:1]
+        print('Configuring laptop screen:', ', '.join(use))
+        self.disable_unneeded(use)
+        self.enable_needed(use)
+        self.primary_display(use[0])
+        self.run_xrandr()
+        self.set_default_sound_sink(INTERNAL_AUDIO_SINK)
 
-    def _configure(self, use, dont, sink):
-        # run xrandr to configure displays
-        xrandr_cmd = ['xrandr']
-        for i, display in enumerate(use):
-            xrandr_cmd += ['--output', display, '--auto']
-            if i:
-                xrandr_cmd += ['--right-of', use[i-1]]
-        for display in dont:
-            xrandr_cmd += ['--output', display, '--off']
-        run(xrandr_cmd, self.debug)
+# known configuration -- home desk {{{1
+class Desktop(Configuration):
+    @classmethod
+    def is_suitable(cls):
+        return bool(desktop_screens)
 
-        # run pactl to configure default sink
-        if sink:
-            pactl_cmd = ['pactl', 'set-default-sink', sink]
-            run(pactl_cmd, self.debug)
-        return True
+    def configure(self):
+        use = desktop_screens[0:2]
+        print('Configuring desktop screens:', ', '.join(use))
+        self.disable_unneeded(use)
+        self.enable_needed(use)
+        self.primary_display(use[0])
+        self.arrange_displays(use)
+        self.run_xrandr()
+        self.set_default_sound_sink(EXTERNAL_AUDIO_SINK)
 
-    def configure_dual_external_monitors(self):
-        # activate the first two external monitors, deactivate all others
-        if len(self.external) >= 2:
-            use = self.external[0:2]
-            dont = self.external[2:] + self.builtin + self.projector
-            sink = external_audio_sink
-            return self._configure(use, dont, sink)
-        if self.debug:
-            print('Dual external monitor configuration is not available.')
-        return False
-    
-    def configure_builtin_and_projector(self):
-        # activate the first built-in display and first projector
-        # deactivate any others
-        if len(self.builtin) >= 1 and len(self.projector) >= 1:
-            use = [self.builtin[0], self.projector[0]]
-            dont = self.external + self.builtin[1:] + self.projector[1:]
-            sink = internal_audio_sink
-            return self._configure(use, dont, sink)
-        if self.debug:
-            print('Built-in and projector display configuration is not available.')
-        return False
-    
-    def configure_builtin(self):
-        # activate the first built-in display, deactivate any others
-        if len(self.builtin) >= 1:
-            use = [self.builtin[0]]
-            dont = self.external + self.builtin[1:] + self.projector
-            sink = internal_audio_sink
-            return self._configure(use, dont, sink)
-        if self.debug:
-            print('Built-in display configuration is not available.')
-        return False
+# known configuration -- laptop with projector {{{1
+class Projector(Configuration):
+    @classmethod
+    def is_suitable(cls):
+        return bool(projectors)
 
-    def configure_default(self):
-        # consider the available configurations in order of preference
-        # stop after the first one that works
-        result = self.configure_dual_external_monitors()
-        if result:
-            return result
-        result = self.configure_builtin_and_projector()
-        if result:
-            return result
-        return self.configure_builtin()
+    def configure(self):
+        use = [laptop_screens[0], projectors[0]]
+        print('Configuring laptop screen with projector:', ', '.join(use))
+        self.disable_unneeded(use)
+        self.enable_needed(use)
+        self.primary_display(laptop_screens[0])
+        self.arrange_displays(use)
+        self.run_xrandr()
+        self.set_default_sound_sink(INTERNAL_AUDIO_SINK)
 
-# initialization
-scripts.script_prefs(exit_upon_error=False, show_cmd_in_errors=False)
+# unknown configuration -- just turn on all available displays {{{1
+class Available(Configuration):
+    @classmethod
+    def is_suitable(cls):
+        return bool(available_displays)
 
-# read command line
-cmdline = docopt.docopt(__doc__)
+    def configure(self):
+        print(
+            'Unknown configuration, enabling all available screens:',
+            ', '.join(self.available_displays)
+        )
+        # enable those displays that are present
+        self.enable_display(self.available_displays)
+        self.run_xrandr()
+        sys.exit()
 
-# determine which displays are available
-displays = Displays(cmdline['--trialrun'])
+# Main {{{1
+def reset_keyboard():
+    sh('r')
 
-# configure displays as requested by the user
-if cmdline['--laptop']:
-    displays.configure_builtin()
-elif cmdline['--desktop']:
-    displays.configure_dual_external_monitors()
-elif cmdline['--projector']:
-    displays.configure_builtin_and_projector()
-else:
-    displays.configure_default()
+try:
+    cmdline = docopt.docopt(__doc__)
+    reset_keyboard()
 
-# run clean up command if available
-if cleanup_cmd:
-    run([cleanup_cmd], cmdline['--trialrun'])
+    # determine which displays are present and which are not
+    xrandr = Sh(['xrandr', '--query'], modes='OeW')
+    available_displays = set()
+    unavailable_displays = set()
+    for line in xrandr.stdout.split('\n'):
+        words = line.split()
+        if len(words) >= 2:
+            if words[1] == 'connected':
+                available_displays.add(words[0])
+            elif words[1] == 'disconnected':
+                unavailable_displays.add(words[0])
+
+    laptop_screens = []
+    desktop_screens = []
+    projectors = []
+    for display in sorted(available_displays):
+        if display.startswith(LAPTOP_PREFIX):
+            laptop_screens.append(display)
+        elif display.startswith(DESKTOP_PREFIX):
+            desktop_screens.append(display)
+        elif display.startswith(PROJECTOR_PREFIX):
+            projectors.append(display)
+        else:
+            print('%s: unknown display type' % display)
+
+    # identify configuration and activate it
+    if cmdline['--laptop']:
+        configuration = Laptop(available_displays, unavailable_displays)
+    elif cmdline['--desktop']:
+        configuration = Desktop(available_displays, unavailable_displays)
+    elif cmdline['--projector']:
+        configuration = Projector(available_displays, unavailable_displays)
+    elif Desktop.is_suitable():
+        configuration = Desktop(available_displays, unavailable_displays)
+    elif Projector.is_suitable():
+        configuration = Projector(available_displays, unavailable_displays)
+    elif Laptop.is_suitable():
+        configuration = Laptop(available_displays, unavailable_displays)
+    else:
+        configuration = Available(available_displays, unavailable_displays)
+    configuration.configure()
+
+except ScriptError as error:
+    sys.exit(str(error))
+except KeyboardInterrupt:
+    sys.exit('Killed by user.')

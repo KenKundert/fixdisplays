@@ -9,7 +9,7 @@
 cmd=fixdisplays
 
 # Set python to the version of python you wish to use (ex. python2 or python3)
-python=python2
+python=python3
 
 # Determine the version of python we are using
 vers=$($python -c 'import sys; print("%s.%s" % (sys.version_info[0], sys.version_info[1]))')
