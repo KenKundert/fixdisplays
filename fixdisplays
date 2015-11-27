@@ -14,7 +14,9 @@ Options:
 """
 
 # Imports {{{1
-from messenger import Messenger, display, error, fatal, narrate, terminate
+from messenger import (
+    Messenger, conjoin, display, error, fatal, narrate, plural, terminate
+)
 from scripts import Sh, ScriptError, sh, script_prefs, join
 script_prefs(exit_upon_error = False)
 import docopt
@@ -47,8 +49,14 @@ class Configuration:
         #for screen in unavailable_screens:
         #    self.disable_screen(screen)
 
-        narrate('Available screens:', ', '.join(available_screens))
-        narrate('Unavailable screens:', ', '.join(unavailable_screens))
+        narrate(
+            'Available %s:' % plural(available_screens, 'screen'),
+            conjoin(available_screens)
+        )
+        narrate(
+            'Unavailable %s:' % plural(unavailable_screens, 'screen'),
+            conjoin(unavailable_screens)
+        )
 
     # disable_unneeded() {{{2
     def disable_unneeded(self, use):
@@ -106,7 +114,7 @@ class Laptop(Configuration):
 
     def configure(self):
         use = laptop_screens[0:1]
-        display('Configuring laptop screen:', ', '.join(use))
+        display('Configuring laptop %s:' % plural(use, 'screen'), conjoin(use))
         self.disable_unneeded(use)
         self.enable_needed(use)
         self.primary_screen(use[0])
@@ -121,7 +129,7 @@ class Desktop(Configuration):
 
     def configure(self):
         use = desktop_screens[0:2]
-        display('Configuring desktop screens:', ', '.join(use))
+        display('Configuring desktop %s:' % plural(use, 'screen'), conjoin(use))
         self.disable_unneeded(use)
         self.enable_needed(use)
         self.primary_screen(use[0])
@@ -137,7 +145,10 @@ class Projector(Configuration):
 
     def configure(self):
         use = [laptop_screens[0], projectors[0]]
-        display('Configuring laptop screen with projector:', ', '.join(use))
+        display(
+            'Configuring laptop %s with projector:' % plural(use, 'screen'),
+            conjoin(use)
+        )
         self.disable_unneeded(use)
         self.enable_needed(use)
         self.primary_screen(laptop_screens[0])
@@ -154,7 +165,7 @@ class Available(Configuration):
     def configure(self):
         display(
             'Unknown configuration, enabling all available screens:',
-            ', '.join(self.available_screens)
+            conjoin(self.available_screens)
         )
         # enable those screens that are present
         self.enable_screen(self.available_screens)
