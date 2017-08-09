@@ -12,32 +12,52 @@ Options:
     -n, --narrate    narrate the changes
     -q, --quiet      suppress all messages except for error messages
 """
+#    -v, --vertical   place projector display above laptop display
 
 # Imports {{{1
-from messenger import (
-    Messenger, conjoin, display, error, fatal, narrate, plural, terminate
+from inform import (
+    Inform, conjoin, display, error, fatal, narrate, plural, terminate
 )
 from scripts import Sh, ScriptError, sh, script_prefs, join
 script_prefs(exit_upon_error = False)
 import docopt
 import sys
+import platform
 
 # Constants {{{1
 LAPTOP_PREFIX = 'LVDS'
 DESKTOP_PREFIX = 'DP'
 PROJECTOR_PREFIX = 'VGA'
 
-# use 'pactl list' to determine names of audio sinks                             
-# # set to None if it setting the default audio sink is not desired                
-EXTERNAL_AUDIO_SINK = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00-Device.analog-stereo'
-INTERNAL_AUDIO_SINK = 'alsa_output.pci-0000_00_1b.0.analog-stereo' 
+# use 'pactl list' to determine names of audio sinks
+# # set to None if it setting the default audio sink is not desired
+
+if 'centos' in platform.platform().lower():
+    SOUND_SINKS = dict(
+        external = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00-Device.analog-stereo',
+        internal = 'alsa_output.pci-0000_00_1b.0.analog-stereo'
+    )
+else:
+    SOUND_SINKS = dict(
+        external = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00.analog-stereo',
+        internal = 'alsa_output.pci-0000_00_1b.0.analog-stereo'
+    )
 
 # Configuration class {{{1
 class Configuration:
     # __init__() {{{2
     def __init__(self, available_screens, unavailable_screens):
-        self.xrandr_cmd = ['xrandr']
         self.available_screens = available_screens
+        self.screens = {}
+
+        narrate(
+            'Available %s:' % plural(available_screens, 'screen'),
+            conjoin(available_screens)
+        )
+        narrate(
+            'Unavailable %s:' % plural(unavailable_screens, 'screen'),
+            conjoin(unavailable_screens)
+        )
 
         # configure the screens
         if not self.is_suitable():
@@ -49,32 +69,22 @@ class Configuration:
         #for screen in unavailable_screens:
         #    self.disable_screen(screen)
 
-        narrate(
-            'Available %s:' % plural(available_screens, 'screen'),
-            conjoin(available_screens)
-        )
-        narrate(
-            'Unavailable %s:' % plural(unavailable_screens, 'screen'),
-            conjoin(unavailable_screens)
-        )
-
-    # disable_unneeded() {{{2
-    def disable_unneeded(self, use):
-        for screen in self.available_screens:
-            if screen not in use:
-                narrate('Disable screen:', screen)
-                self.xrandr_cmd += ['--output', screen, '--off']
-
     # enable_needed() {{{2
     def enable_needed(self, use):
-        for screen in use:
-            narrate('Enable screen:', screen)
-            self.xrandr_cmd += ['--output', screen, '--auto']
+        for screen in self.available_screens:
+            if screen in use:
+                narrate('Enable screen:', screen)
+                self.screens[screen] = ['--auto']
+            else:
+                narrate('Disable screen:', screen)
+                self.screens[screen] = ['--off']
 
     # primary_screen() {{{2
     def primary_screen(self, screen):
+        # For i3 the primary display designates where the tray icons are shown
+        # (assure tray_output is set to primary in i3bar settings (in i3 config)
         narrate('Primary screen:', screen)
-        self.xrandr_cmd += ['--output', screen, '--primary']
+        self.screens[screen] += ['--primary']
 
     # arrange_screens() {{{2
     def arrange_screens(self, screens):
@@ -84,16 +94,27 @@ class Configuration:
             else:
                 left, right = screens
             narrate('Arrange screens:', ', '.join([left, right]))
-            self.xrandr_cmd += ['--output', left, '--right-of', right]
+            if True or cmdline['--vertical']:
+                self.screens[left] += ['--below', right]
+                display('%s above %s.' % (right, left))
+            else:
+                self.screens[left] += ['--left-of', right]
+                display('%s left of %s.' % (left, right))
         else:
             assert len(screens) <= 2
             assert len(screens) >= 1
+            display(screens[0])
 
     # run_xrandr() {{{2
     def run_xrandr(self):
         try:
-            narrate('RUNNING:', ' '.join(self.xrandr_cmd))
-            Sh(self.xrandr_cmd)
+            xrandr_cmd = 'xrandr --auto'.split()
+                # the --auto causes xrandr to start in a reasonable state
+                # specifically it will disable screens that are no longer available
+            for screen in sorted(self.screens.keys(), key=lambda s: len(self.screens[s])):
+                xrandr_cmd += ['--output', screen] + self.screens[screen]
+            narrate('running:', ' '.join(xrandr_cmd))
+            Sh(xrandr_cmd, 'SoEW0')
         except ScriptError as exception:
             error('Could not configure screen with xrandr: %s' % exception)
 
@@ -101,7 +122,9 @@ class Configuration:
     def set_default_sound_sink(self, sink):
         try:
             narrate('Set default sound sink: %s' % sink)
-            Sh('pactl set-default-sink %s' % sink)
+            pactl_cmd = ['pactl', 'set-default-sink', SOUND_SINKS[sink]]
+            narrate('running:', ' '.join(pactl_cmd))
+            Sh(pactl_cmd)
         except ScriptError:
             error('Could not set default sound sink: %s' % sink)
 
@@ -114,12 +137,12 @@ class Laptop(Configuration):
 
     def configure(self):
         use = laptop_screens[0:1]
-        display('Configuring laptop %s:' % plural(use, 'screen'), conjoin(use))
-        self.disable_unneeded(use)
+        display('Configuring laptop: ', end='')
         self.enable_needed(use)
         self.primary_screen(use[0])
+        self.arrange_screens(use)
         self.run_xrandr()
-        self.set_default_sound_sink(INTERNAL_AUDIO_SINK)
+        self.set_default_sound_sink('internal')
 
 # known configuration -- home desk {{{1
 class Desktop(Configuration):
@@ -129,13 +152,12 @@ class Desktop(Configuration):
 
     def configure(self):
         use = desktop_screens[0:2]
-        display('Configuring desktop %s:' % plural(use, 'screen'), conjoin(use))
-        self.disable_unneeded(use)
+        display('Configuring desktop: ', end='')
         self.enable_needed(use)
         self.primary_screen(use[0])
         self.arrange_screens(use)
         self.run_xrandr()
-        self.set_default_sound_sink(EXTERNAL_AUDIO_SINK)
+        self.set_default_sound_sink('external')
 
 # known configuration -- laptop with projector {{{1
 class Projector(Configuration):
@@ -145,16 +167,12 @@ class Projector(Configuration):
 
     def configure(self):
         use = [laptop_screens[0], projectors[0]]
-        display(
-            'Configuring laptop %s with projector:' % plural(use, 'screen'),
-            conjoin(use)
-        )
-        self.disable_unneeded(use)
+        display('Configuring laptop with projector: ', end='')
         self.enable_needed(use)
         self.primary_screen(laptop_screens[0])
         self.arrange_screens(use)
         self.run_xrandr()
-        self.set_default_sound_sink(INTERNAL_AUDIO_SINK)
+        self.set_default_sound_sink('external')
 
 # unknown configuration -- just turn on all available screens {{{1
 class Available(Configuration):
@@ -178,15 +196,20 @@ def reset_keyboard():
 
 try:
     cmdline = docopt.docopt(__doc__)
-    Messenger(
+    Inform(
         quiet=cmdline['--quiet'],
         narrate=cmdline['--narrate'],
-        logfile = join('~/.fixdisplays.log')
+        logfile = join('~/.fixdisplays.log'),
+        flush = True,
     )
+    narrate('Reset keyboard.')
     reset_keyboard()
 
+
     # determine which screens are present and which are not
+    narrate('Query screens.')
     xrandr = Sh(['xrandr', '--query'], modes='OeW')
+    narrate('Identify screens.')
     available_screens = set()
     unavailable_screens = set()
     for line in xrandr.stdout.split('\n'):
@@ -197,6 +220,7 @@ try:
             elif words[1] == 'disconnected':
                 unavailable_screens.add(words[0])
 
+    # identify the type of each available screen
     laptop_screens = []
     desktop_screens = []
     projectors = []
@@ -208,7 +232,7 @@ try:
         elif screen.startswith(PROJECTOR_PREFIX):
             projectors.append(screen)
         else:
-            errro('%s: unknown screen type' % screen)
+            error('%s: unknown screen type' % screen)
 
     # identify configuration and activate it
     if cmdline['--laptop']:
