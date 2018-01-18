@@ -1,47 +1,49 @@
-#!/bin/env python
+#!/bin/env python3
 """Control which screens are used.
 
 Usage:
     fixdisplays [options]
+    fixdisplays [options] l|laptop
+    fixdisplays [options] d|desktop
+    fixdisplays [options] p|projector
 
 Options:
-    -l, --laptop     enable built-in screen, disable all others.
-    -d, --desktop    enable external monitors, disable all others.
-    -p, --projector  enable external VGA projector along with built-in screen.
     -s, --swap       swap the displays
     -n, --narrate    narrate the changes
     -q, --quiet      suppress all messages except for error messages
+
+The three available configurations are:
+    l, laptop        enable built-in screen, disable all others.
+    d, desktop       enable external monitors, disable all others.
+    p, projector     enable external VGA projector along with built-in screen.
 """
 #    -v, --vertical   place projector display above laptop display
 
 # Imports {{{1
 from inform import (
-    Inform, conjoin, display, error, fatal, narrate, plural, terminate
+    Inform, codicil, conjoin, done, display, error, fatal, narrate, plural, 
+    os_error, terminate
 )
-from scripts import Sh, ScriptError, sh, script_prefs, join
-script_prefs(exit_upon_error = False)
+from shlib import rm, Run, to_path
 import docopt
-import sys
-import platform
+from textwrap import dedent
 
 # Constants {{{1
 LAPTOP_PREFIX = 'LVDS'
 DESKTOP_PREFIX = 'DP'
 PROJECTOR_PREFIX = 'VGA'
+SOUND_SINKS = dict(
+    #external = 'alsa_output.usb',
+    #internal = 'alsa_output.pci',
+    external = 'C-Media USB Audio Device',
+    internal = 'HDA Intel PCH',
+)
+RESET_KEYBOARD = 'reset'
+RESET_KEYBOARD = 'r'  # this is a script I use, you should delete this line
+VOL_CONTROL_CMD = '~/bin/vol'
+    # if set, a script that can be used to control the volume of the active 
+    # sound card is created
 
-# use 'pactl list' to determine names of audio sinks
-# # set to None if it setting the default audio sink is not desired
-
-if 'centos' in platform.platform().lower():
-    SOUND_SINKS = dict(
-        external = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00-Device.analog-stereo',
-        internal = 'alsa_output.pci-0000_00_1b.0.analog-stereo'
-    )
-else:
-    SOUND_SINKS = dict(
-        external = 'alsa_output.usb-0d8c_C-Media_USB_Audio_Device-00.analog-stereo',
-        internal = 'alsa_output.pci-0000_00_1b.0.analog-stereo'
-    )
 
 # Configuration class {{{1
 class Configuration:
@@ -61,7 +63,7 @@ class Configuration:
 
         # configure the screens
         if not self.is_suitable():
-            sys.exit('Displays not available to support %s configuration.' % (
+            fatal('Displays not available to support %s configuration.' % (
                 self.__class__.__name__.lower()
             ))
 
@@ -114,19 +116,64 @@ class Configuration:
             for screen in sorted(self.screens.keys(), key=lambda s: len(self.screens[s])):
                 xrandr_cmd += ['--output', screen] + self.screens[screen]
             narrate('running:', ' '.join(xrandr_cmd))
-            Sh(xrandr_cmd, 'SoEW0')
-        except ScriptError as exception:
-            error('Could not configure screen with xrandr: %s' % exception)
+            Run(xrandr_cmd, 'SOEW0')
+        except OSError as e:
+            error('Could not configure screen with xrandr: %s' % os_error(e))
 
     # set_default_sound_sink() {{{2
     def set_default_sound_sink(self, sink):
+        pa_sinks = {}
+        alsa_sinks = {}
         try:
-            narrate('Set default sound sink: %s' % sink)
-            pactl_cmd = ['pactl', 'set-default-sink', SOUND_SINKS[sink]]
-            narrate('running:', ' '.join(pactl_cmd))
-            Sh(pactl_cmd)
-        except ScriptError:
-            error('Could not set default sound sink: %s' % sink)
+            # get list of sound sinks
+            pactl = Run('pacmd list-sinks', modes='sOeW1')
+            name = alsa_card = matches = None
+            for line in reversed(pactl.stdout.split('\n')):
+                if 'name: ' in line:
+                    name = line.split()[-1]
+                    if name[0] == '<':
+                        name = name[1:-1]
+                if 'alsa.card = ' in line:
+                    alsa_card = line.split()[-1]
+                    if alsa_card[0] == '"':
+                        alsa_card = alsa_card[1:-1]
+                for k, v in SOUND_SINKS.items():
+                    if v in line:
+                        matches = k
+                if 'index: ' in line:
+                    index = line.split()[-1]
+                    if matches:
+                        if name:
+                            pa_sinks[matches] = name
+                        if alsa_card:
+                            alsa_sinks[matches] = alsa_card
+
+            if sink in pa_sinks:
+                narrate(f'Set default sound sink: {sink}')
+                card = pa_sinks[sink]
+                pactl_cmd = ['pactl', 'set-default-sink', card]
+                narrate('running:', ' '.join(pactl_cmd))
+                Run(pactl_cmd)
+            if VOL_CONTROL_CMD:
+                if sink in alsa_sinks:
+                    narrate(f'Creating volume controller: {VOL_CONTROL_CMD}')
+                    path = to_path(VOL_CONTROL_CMD)
+                    path.write_text(dedent(f'''
+                        #!/bin/sh
+                        # adjust the volume of the sound card
+                        # this file is automatically generated by fixdisplays
+                        # to adjust to the currently active sound card
+                        # j/k change the volume, Esc quits
+
+                        alsamixer --card={alsa_sinks[sink]} --view=playback
+                    ''').lstrip())
+                    path.chmod(0o755)
+                else:
+                    narrate(f'Deleting volume controller: {VOL_CONTROL_CMD}')
+                    rm(VOL_CONTROL_CMD)
+        except OSError as e:
+            error(f'Could not set default sound sink: {sink}')
+            codicil(os_error(e))
 
 # define known configurations
 # known configuration -- laptop without projector {{{1
@@ -188,27 +235,28 @@ class Available(Configuration):
         # enable those screens that are present
         self.enable_screen(self.available_screens)
         self.run_xrandr()
-        sys.exit()
+        done
 
 # Main {{{1
 def reset_keyboard():
-    sh('r')
+    if RESET_KEYBOARD:
+        narrate('Reset keyboard.')
+        Run(RESET_KEYBOARD, 'soeW')
 
 try:
     cmdline = docopt.docopt(__doc__)
     Inform(
         quiet=cmdline['--quiet'],
         narrate=cmdline['--narrate'],
-        logfile = join('~/.fixdisplays.log'),
+        logfile = to_path('~/.fixdisplays.log'),
         flush = True,
     )
-    narrate('Reset keyboard.')
     reset_keyboard()
 
 
     # determine which screens are present and which are not
     narrate('Query screens.')
-    xrandr = Sh(['xrandr', '--query'], modes='OeW')
+    xrandr = Run(['xrandr', '--query'], modes='OeW')
     narrate('Identify screens.')
     available_screens = set()
     unavailable_screens = set()
@@ -235,11 +283,11 @@ try:
             error('%s: unknown screen type' % screen)
 
     # identify configuration and activate it
-    if cmdline['--laptop']:
+    if cmdline['laptop'] or cmdline['l']:
         configuration = Laptop(available_screens, unavailable_screens)
-    elif cmdline['--desktop']:
+    elif cmdline['desktop'] or cmdline['d']:
         configuration = Desktop(available_screens, unavailable_screens)
-    elif cmdline['--projector']:
+    elif cmdline['projector'] or cmdline['p']:
         configuration = Projector(available_screens, unavailable_screens)
     elif Desktop.is_suitable():
         configuration = Desktop(available_screens, unavailable_screens)
@@ -251,8 +299,8 @@ try:
         configuration = Available(available_screens, unavailable_screens)
     configuration.configure()
 
-except ScriptError as exception:
-    fatal(exception)
+except OSError as e:
+    fatal(e)
 except KeyboardInterrupt:
     display('Killed by user.')
 terminate()
