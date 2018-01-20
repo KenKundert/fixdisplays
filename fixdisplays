@@ -116,7 +116,7 @@ class Configuration:
             for screen in sorted(self.screens.keys(), key=lambda s: len(self.screens[s])):
                 xrandr_cmd += ['--output', screen] + self.screens[screen]
             narrate('running:', ' '.join(xrandr_cmd))
-            Run(xrandr_cmd, 'SOEW0')
+            Run(xrandr_cmd, 'sOEW')
         except OSError as e:
             error('Could not configure screen with xrandr: %s' % os_error(e))
 
@@ -153,7 +153,7 @@ class Configuration:
                 card = pa_sinks[sink]
                 pactl_cmd = ['pactl', 'set-default-sink', card]
                 narrate('running:', ' '.join(pactl_cmd))
-                Run(pactl_cmd)
+                Run(pactl_cmd, 'soeW')
             if VOL_CONTROL_CMD:
                 if sink in alsa_sinks:
                     narrate(f'Creating volume controller: {VOL_CONTROL_CMD}')
@@ -256,7 +256,7 @@ try:
 
     # determine which screens are present and which are not
     narrate('Query screens.')
-    xrandr = Run(['xrandr', '--query'], modes='OeW')
+    xrandr = Run(['xrandr', '--query'], modes='sOeW')
     narrate('Identify screens.')
     available_screens = set()
     unavailable_screens = set()
