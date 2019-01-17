@@ -21,7 +21,7 @@ The three available configurations are:
 
 # Imports {{{1
 from inform import (
-    Inform, codicil, conjoin, done, display, error, fatal, narrate, plural, 
+    Inform, codicil, conjoin, done, display, error, fatal, narrate, plural,
     os_error, terminate
 )
 from shlib import rm, Run, to_path
@@ -53,11 +53,11 @@ class Configuration:
         self.screens = {}
 
         narrate(
-            'Available %s:' % plural(available_screens, 'screen'),
+            f'Available {plural(available_screens):screen/s}:',
             conjoin(available_screens)
         )
         narrate(
-            'Unavailable %s:' % plural(unavailable_screens, 'screen'),
+            f'Unavailable {plural(unavailable_screens):screen/s}:',
             conjoin(unavailable_screens)
         )
 

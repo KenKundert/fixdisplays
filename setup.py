@@ -12,7 +12,7 @@ setup(
     author="Ken Kundert",
     author_email='theNurd@nurdletech.com',
     scripts='fixdisplays'.split(),
-    install_requires='docopt inform shlib'.split(),
+    install_requires='docopt inform>=1.15 shlib'.split(),
     download_url='https://github.com/kenkundert/fixdisplays/tarball/master',
     license='GPLv3',
     classifiers=[
