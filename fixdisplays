@@ -6,18 +6,19 @@ Usage:
     fixdisplays [options] l|laptop
     fixdisplays [options] d|desktop
     fixdisplays [options] p|projector
+    fixdisplays [options] s|same
 
 Options:
     -s, --swap       swap the displays
     -n, --narrate    narrate the changes
     -q, --quiet      suppress all messages except for error messages
 
-The three available configurations are:
+The available configurations are:
     l, laptop        enable built-in screen, disable all others.
     d, desktop       enable external monitors, disable all others.
     p, projector     enable external VGA projector along with built-in screen.
+    s, same          make external VGA projector the same as builtin screen.
 """
-#    -v, --vertical   place projector display above laptop display
 
 # Imports {{{1
 from inform import (
@@ -89,14 +90,17 @@ class Configuration:
         self.screens[screen] += ['--primary']
 
     # arrange_screens() {{{2
-    def arrange_screens(self, screens):
+    def arrange_screens(self, screens, same=False):
         if len(screens) == 2:
             if cmdline['--swap']:
                 right, left = screens
             else:
                 left, right = screens
             narrate('Arrange screens:', ', '.join([left, right]))
-            if True or cmdline['--vertical']:
+            if same:
+                self.screens[left] += ['--same-as', right]
+                display('%s same as %s.' % (right, left))
+            elif True or cmdline['--vertical']:
                 self.screens[left] += ['--below', right]
                 display('%s above %s.' % (right, left))
             else:
@@ -221,6 +225,21 @@ class Projector(Configuration):
         self.run_xrandr()
         self.set_default_sound_sink('external')
 
+# known configuration -- laptop same as projector {{{1
+class Same(Configuration):
+    @classmethod
+    def is_suitable(cls):
+        return bool(projectors)
+
+    def configure(self):
+        use = [laptop_screens[0], projectors[0]]
+        display('Configuring laptop with projector: ', end='')
+        self.enable_needed(use)
+        self.primary_screen(laptop_screens[0])
+        self.arrange_screens(use, True)
+        self.run_xrandr()
+        self.set_default_sound_sink('external')
+
 # unknown configuration -- just turn on all available screens {{{1
 class Available(Configuration):
     @classmethod
@@ -289,6 +308,8 @@ try:
         configuration = Desktop(available_screens, unavailable_screens)
     elif cmdline['projector'] or cmdline['p']:
         configuration = Projector(available_screens, unavailable_screens)
+    elif cmdline['same'] or cmdline['s']:
+        configuration = Same(available_screens, unavailable_screens)
     elif Desktop.is_suitable():
         configuration = Desktop(available_screens, unavailable_screens)
     elif Projector.is_suitable():
