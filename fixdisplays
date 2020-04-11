@@ -30,9 +30,9 @@ import docopt
 from textwrap import dedent
 
 # Constants {{{1
-LAPTOP_PREFIX = 'LVDS'
+LAPTOP_PREFIX = 'eDP'
 DESKTOP_PREFIX = 'DP'
-PROJECTOR_PREFIX = 'VGA'
+PROJECTOR_PREFIX = 'HDMI'
 SOUND_SINKS = dict(
     #external = 'alsa_output.usb',
     #internal = 'alsa_output.pci',
@@ -195,14 +195,31 @@ class Laptop(Configuration):
         self.run_xrandr()
         self.set_default_sound_sink('internal')
 
+# known configuration -- home desk{{{1
+# this version uses only external monitors
+# class Desktop(Configuration):
+#     @classmethod
+#     def is_suitable(cls):
+#         return bool(desktop_screens)
+#
+#     def configure(self):
+#         use = desktop_screens[0:2]
+#         display('Configuring desktop: ', end='')
+#         self.enable_needed(use)
+#         self.primary_screen(use[0])
+#         self.arrange_screens(use)
+#         self.run_xrandr()
+#         self.set_default_sound_sink('external')
+
 # known configuration -- home desk {{{1
+# this version uses laptop screen and external monitor(s)
 class Desktop(Configuration):
     @classmethod
     def is_suitable(cls):
-        return bool(desktop_screens)
+        return bool(desktop_screens) and bool(laptop_screens)
 
     def configure(self):
-        use = desktop_screens[0:2]
+        use = laptop_screens[0:1] + desktop_screens[0:2]
         display('Configuring desktop: ', end='')
         self.enable_needed(use)
         self.primary_screen(use[0])
@@ -252,7 +269,7 @@ class Available(Configuration):
             conjoin(self.available_screens)
         )
         # enable those screens that are present
-        self.enable_screen(self.available_screens)
+        self.enable_needed(self.available_screens)
         self.run_xrandr()
         done
 
@@ -260,7 +277,10 @@ class Available(Configuration):
 def reset_keyboard():
     if RESET_KEYBOARD:
         narrate('Reset keyboard.')
-        Run(RESET_KEYBOARD, 'soeW')
+        try:
+            Run(RESET_KEYBOARD, 'soeW')
+        except OSError as e:
+            error(os_error(e))
 
 try:
     cmdline = docopt.docopt(__doc__)
