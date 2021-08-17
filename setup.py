@@ -6,16 +6,17 @@ if sys.version_info < (3,6):
     sys.exit('requires python3.6 or better.')
 
 setup(
-    name='fixdisplays',
-    version='1.1',
-    description=dedent("Controls which screens are used"),
-    author="Ken Kundert",
-    author_email='theNurd@nurdletech.com',
-    scripts='fixdisplays'.split(),
-    install_requires='docopt inform>=1.15 shlib'.split(),
-    download_url='https://github.com/kenkundert/fixdisplays/tarball/master',
-    license='GPLv3',
-    classifiers=[
+    name = 'fixdisplays',
+    version = '1.1',
+    description = dedent("Controls which screens are used"),
+    author = "Ken Kundert",
+    author_email = 'theNurd@nurdletech.com',
+    scripts = 'fixdisplays'.split(),
+    install_requires = 'docopt inform>=1.15 shlib'.split(),
+    zip_safe = True,
+    download_url = 'https://github.com/kenkundert/fixdisplays/tarball/master',
+    license = 'GPLv3',
+    classifiers = [
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)',
